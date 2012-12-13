@@ -1,0 +1,20 @@
+{
+    "fields" : [
+        "res_id",
+        "date_short",
+        "comment",
+        "det_id",
+        "slide_id",
+        "pos",
+        "area",
+        "density",
+        "icd",
+        "saturated",
+        "inhom_ok"
+
+    ],
+    "nofields" : [
+        "date"
+    ]
+
+}
