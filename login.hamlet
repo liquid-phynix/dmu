@@ -1,0 +1,21 @@
+<div style="display: table-row;">
+  <div ##{header}>
+    <div ##{title}> <h3> Log in to DMU
+    <div ##{logo}> <img src=@{StaticR logo_png}>
+<div style="display: table-row;">
+  <div ##{login}>
+    <form method=post action="/auth/page/hashdb/login">
+      <table ##{logintable}>
+        <tr>
+          <th>Username:
+          <td>
+            <input id="x" name="username" autofocus="" required>
+        <tr>
+          <th>Password:
+          <td>
+            <input type="password" name="password" required>
+        <tr>
+          <td>&nbsp;
+          <td>
+            <input type="submit" value="Login">
+      <script> if (!("autofocus" in document.createElement("input"))) {document.getElementById("x").focus();}

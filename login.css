@@ -1,0 +1,26 @@
+body,html { margin:0px; padding:0px; height:100%; width:100%; }
+body {
+  background-color:#E9E9E9;
+  background-image:url(@{StaticR bbody_png});
+  display:table;
+}                  
+##{header} {
+  background-color : #363434;
+  background-image:url(@{StaticR hbody_png});
+  color:white;
+
+  display:table-cell;
+  vertical-align:middle;
+  height:60px;
+  text-align:center;
+
+  position:relative;
+}
+##{login} {
+  display:table-cell;
+  vertical-align:middle;
+  width:50%;
+}
+##{logintable} { margin:auto; }
+##{logo} { position:absolute; right:5px; top:5px }
+##{title} { float:center; }

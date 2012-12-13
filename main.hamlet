@@ -1,0 +1,25 @@
+<div style="display: table-row;">
+  <div ##{header}>
+    <button ##{logoutid} onclick="document.location.href='@{AuthR LogoutR}';"> Log out user: #{uname}
+
+    <div ##{datepicker}>
+      <button ##{select}>Select
+      from
+      <input ##{from} type=text style="width: 20%;" readonly>
+      to
+      <input ##{to} type=text style="width: 20%;" readonly>
+
+    <button ##{csv}>CSV
+    <div ##{logo}> <img src=@{StaticR logo_png}>
+<div style="display: table-row;">
+  <div ##{content}>
+    <h1 ##{results}>
+    <table ##{datatable}> 
+      <thead ##{thead}>
+        $forall header <- (getFieldNames site)
+          <th> #{header}
+      $forall row <- rows
+        <tr>
+          $forall col <- row
+            <td>
+              #{col}

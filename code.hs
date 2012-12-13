@@ -1,58 +1,55 @@
-{-# LANGUAGE OverloadedStrings, 
-             TemplateHaskell, 
-             TypeFamilies, 
-             MultiParamTypeClasses, 
-             QuasiQuotes, 
-             FlexibleContexts, 
-             GADTs,
-             ScopedTypeVariables #-}
+{-# LANGUAGE OverloadedStrings, TemplateHaskell, TypeFamilies, MultiParamTypeClasses, QuasiQuotes, FlexibleContexts, GADTs, ScopedTypeVariables #-}
 
-{-
-TODO:
+{- TODO:
   J login page override
   J jquery theming  
   J fix Blob  
-  - compression
+  J compression
   J datatables input as json
   J save header too, when csv export
   - incremental table creation
   - fit content to window size
-  - faster json generation
+  J faster json generation
   - search bar for each column
-  - better json
-  - better postgresql
+  J better json
+  J better postgresql
   - table columns crop text
 -}
 
+-- generic
+import Control.Monad
+import Control.Monad.Trans (liftIO)
+import qualified Data.Map as M
+import qualified Data.List as L
+import Data.Enumerator.List (consume)
+import Data.IORef
+-- yesod
 import Yesod
 import Yesod.Static
 import Yesod.Auth
 import Yesod.Auth.HashDB
+-- dbase
 import Database.Persist.Sqlite
-import Data.Text (Text)
-import qualified Data.Text as T
-
 import qualified Database.HDBC as P
 import qualified Database.HDBC.PostgreSQL as P
-
-import Control.Monad
-import Control.Monad.Trans (liftIO)
-import qualified Data.Map as M
+-- text
 import qualified Data.ByteString.Lazy.Char8 as B
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.Text as T
+import Data.Text (Text)
 import qualified Text.JSON as J
-import qualified Data.Aeson as A
+import Text.Hamlet (hamletFile)
+import Text.Lucius (luciusFile)
+import Text.Julius (juliusFile)
+--import qualified Data.Aeson as A
+-- system
 import System.IO
 import System.Environment (getArgs)
-import qualified Data.List as L
-
-import Data.Enumerator.List (consume)
--- import Network.Wai.Middleware.Gzip (gzip, def)
-import Network.Wai -- (Response (ResponseSource))
+-- wai
+import Network.Wai
 import Network.HTTP.Types (status200)
 import qualified Network.Wai.Handler.Warp as W
-
 
 staticFiles "static"
 
@@ -65,15 +62,18 @@ Person
   deriving Show
 |]
 
-data MyAuthSite = MyAuthSite { getAuthConn :: Connection
-                             , getPConn :: P.Connection
-                             , getDateIntervalStatement :: P.Statement
-                             , getStatic :: Static
-                             , getFieldNames :: [String] }
+data MyAuthSite =
+  MyAuthSite { getAuthConn :: Connection
+             , getPConn :: P.Connection
+             , getDateIntervalStatement :: P.Statement
+             , getStatic :: Static
+             , getFieldNames :: [String]
+             , getRestOfQuery :: IORef (M.Map Text [P.SqlValue]) }
 
 mkYesod "MyAuthSite" [parseRoutes|
 / RootR GET
 /query QueryR POST
+/query2 Query2R POST
 /auth AuthR Auth getAuth
 /static StaticR Static getStatic
 |]
@@ -106,60 +106,10 @@ authPlugin =
     AuthPlugin apname apdispatch aplogin ->
       AuthPlugin apname apdispatch $ \input -> do
         [header, logo, title, login, logintable] <- lift $ replicateM 5 newIdent
---        aplogin input        
-        toWidget [lucius|
-body,html { margin:0px; padding:0px; height:100%; width:100%; }
-body {
-  background-color:#E9E9E9;
-  background-image:url(@{StaticR bbody_png});
-  display:table;
-}                  
-##{header} {
-  background-color : #363434;
-  background-image:url(@{StaticR hbody_png});
-  color:white;
-
-  display:table-cell;
-  vertical-align:middle;
-  height:60px;
-  text-align:center;
-
-  position:relative;
-}
-##{login} {
-  display:table-cell;
-  vertical-align:middle;
-  width:50%;
-}
-##{logintable} { margin:auto; }
-##{logo} { position:absolute; right:5px; top:5px }
-##{title} { float:center; }
-|]
-
-        [whamlet|
-<div style="display: table-row;">
-  <div ##{header}>
-    <div ##{title}> <h3> Log in to DMU
-    <div ##{logo}> <img src=@{StaticR logo_png}>
-<div style="display: table-row;">
-  <div ##{login}>
-    <form method=post action="/auth/page/hashdb/login">
-      <table ##{logintable}>
-        <tr>
-          <th>Username:
-          <td>
-            <input id="x" name="username" autofocus="" required>
-        <tr>
-          <th>Password:
-          <td>
-            <input type="password" name="password" required>
-        <tr>
-          <td>&nbsp;
-          <td>
-            <input type="submit" value="Login">
-      <script> if (!("autofocus" in document.createElement("input"))) {document.getElementById("x").focus();}
-
-|]
+        let html = $(hamletFile "login.hamlet")
+            css = $(luciusFile "login.css")
+        toWidget css
+        [whamlet| ^{html} |]
 
 instance YesodAuth MyAuthSite where
     type AuthId MyAuthSite = PersonId
@@ -184,42 +134,25 @@ instance HashDBUser (PersonGeneric backend) where
 instance RenderMessage MyAuthSite FormMessage where
   renderMessage _ _ = defaultFormMessage
 
--- select array_to_json(array[cast(res_id as text), cast(date_short as text)]) as result from radometer_results;
-
 -- turn query into json in sql
 selectByDateInterval :: MyAuthSite -> String -> String -> Handler B.ByteString
 selectByDateInterval site from to = do
-  stmt <- liftIO $ P.prepare (getPConn site) $ 
-          "SELECT array_to_json(array[" 
-          ++ L.concat (L.intersperse "," (map (\fn -> "cast(" ++ fn ++ " as text)") (getFieldNames site)))
-          ++ "]) FROM radometer_results WHERE date_short >= ? and date_short <= ?"
+  uname <- getUsername
   liftIO $ P.execute stmt [P.toSql from, P.toSql to]
-  results <- liftIO $ P.fetchAllRows stmt
+  results <- liftIO $ fmap (map head) $ P.fetchAllRows stmt
+  let firstPart = take 100 results
+      secondPart = drop 100 results
+  liftIO $ atomicModifyIORef' (getRestOfQuery site) (\m -> (M.insert uname secondPart m, ()))
   return $ B.concat
     [ "{ \"header\" : " 
     , B.pack $ show $ getFieldNames site
     , ", \"body\" : " 
     , "["
-    , B.intercalate "," $ map fs results 
+    , B.intercalate "," $ map fs firstPart
     , "] }" ]
-  where fs :: [P.SqlValue] -> B.ByteString
-        fs [s] = P.fromSql s
-
-
--- H.prepare conn $ "SELECT array_to_json(array[" ++ LL.concat (LL.intersperse "," (map (\fn -> "cast(" ++ fn ++ " as text)") fields)) ++ "]) FROM radometer_results WHERE date_short >= ? and date_short <= ?"
--- res <- H.execute stmt [H.toSql ("2012-05-01"::String), H.toSql ("2012-05-05" :: String)]
-
--- turn query into json in haskell
--- selectByDateInterval :: MyAuthSite -> String -> String -> Handler B.ByteString
--- selectByDateInterval site from to = do
---   liftIO $ P.execute stmt [P.toSql from, P.toSql to]
---   results <- liftIO $ P.fetchAllRows stmt
---   return $ A.encode $ A.object 
---     [ "header" A..= getFieldNames site
---     , "body" A..= body results ] --(take 100 results) ]
---   where stmt = getDateIntervalStatement site
---         body :: [[P.SqlValue]] -> [[B.ByteString]]
---         body results = map (map P.fromSql) results
+  where fs :: P.SqlValue -> B.ByteString
+        fs s = P.fromSql s
+        stmt = getDateIntervalStatement site
 
 postQueryR :: Handler RepPlain
 postQueryR = do
@@ -229,188 +162,46 @@ postQueryR = do
   query <- selectByDateInterval site (T.unpack from) (T.unpack to)
   return $ RepPlain $ toContent $ query
 
+postQuery2R :: Handler RepPlain
+postQuery2R = do
+  site <- getYesod
+  uname <- getUsername
+  secondPart <- liftIO $ atomicModifyIORef' (getRestOfQuery site) (\m -> (M.delete uname m, m M.! uname))
+  return $ RepPlain $ toContent $ B.concat
+    [ "["
+    , B.intercalate "," $ map fs secondPart
+    , "]" ]
+  where fs :: P.SqlValue -> B.ByteString
+        fs s = P.fromSql s
+
+getUsername = do
+  session <- getSession
+  let (id :: Int) = read $ BS.unpack $ session M.! "_ID"
+  Just person <- runDB $ get (Key (toPersistValue id) :: PersonId)
+  return $ personUsername person
+
 getRootR :: Handler RepHtml
 getRootR = do
   site <- getYesod
-  session <- getSession
+  uname <- getUsername
   
-  let (id :: Int) = read $ BS.unpack $ session M.! "_ID"
-  Just person <- runDB $ get (Key (toPersistValue id) :: PersonId)
-
   let rows :: [[String]] = []
   
   [ header, logo, datatable, logoutid, content, csv, thead, select, from, to, datepicker, results ] <- replicateM 12 newIdent
-  
+  let css = $(luciusFile "main.css")
+      html = $(hamletFile "main.hamlet")
+      js = $(juliusFile "main.js")
   defaultLayout $ do
     setTitle "DMU"
-    
+    toWidgetHead css
+    toWidgetHead js
     toWidgetHead [hamlet| <link rel=stylesheet href=@{StaticR css_jquery_ui_css}> |]
     toWidgetHead [hamlet| <link rel=stylesheet href=@{StaticR css_jquery_dataTables_css}> |]
-    -- toWidgetHead [hamlet| <link rel=stylesheet href=@{StaticR jquerydataTablesthemeroller_css}> |]
     toWidgetHead [hamlet| <script src=@{StaticR js_jquery_1_6_4_min_js}> |]    
     toWidgetHead [hamlet| <script src=@{StaticR js_jquery_ui_1_9_2_custom_min_js}> |]
     toWidgetHead [hamlet| <script src=@{StaticR js_jquery_dataTables_min_js}> |]
     toWidgetHead [hamlet| <script src=@{StaticR js_FixedHeader_min_js}> |]
-    
-    toWidget [lucius|
-body,html { margin:0px; padding:0px; height:100%; width:100%; }
-body { background-color:#E9E9E9; background-image:url(@{StaticR bbody_png}); display:table; }
-h1 { text-align:center; }
-p,h1 { font-size:16px; }
-.ui-red-button { background: #da4b4b; }
-.ui-black-button { background: #0C0C0C; color:white; }
-##{header} {
-background-color:#363434;
-background-image:url(@{StaticR hbody_png}); 
-color:white; 
-display:table-cell; 
-vertical-align:middle; 
-height:60px; 
-text-align:center; 
-position:relative; 
-}
-##{content} { display:table-cell; vertical-align:middle; width:100%; }
-##{logo} { position:absolute; right:5px; top:5px }
-##{logoutid} { float:left; left:10px; }
-##{thead} { background-color: #92A6FA; }
-##{datepicker} { float:left; margin-left:30px; }
-##{datatable} { width:100%; }
-|]
-
-    [whamlet|
-
-<div style="display: table-row;">
-  <div ##{header}>
-    <button ##{logoutid} onclick="document.location.href='@{AuthR LogoutR}';"> Log out user: #{personUsername person}
-
-    <div ##{datepicker}>
-      <button ##{select}>Select
-      from
-      <input ##{from} type=text style="width: 20%;" readonly>
-      to
-      <input ##{to} type=text style="width: 20%;" readonly>
-
-    <button ##{csv}>CSV
-    <div ##{logo}> <img src=@{StaticR logo_png}>
-<div style="display: table-row;">
-  <div ##{content}>
-    <h1 ##{results}>
-    <table ##{datatable}> 
-      <thead ##{thead}>
-        $forall header <- (getFieldNames site)
-          <th> #{header}
-      $forall row <- rows
-        <tr>
-          $forall col <- row
-            <td>
-              #{col}
-
-|]
-
-    toWidgetHead [julius|
-
-window.screen.availWidth = 500;
-
-var dtable;
-$(document).ready(function (){
-  const MIME_TYPE = 'text/plain';                     
-                     
-  $('##{logoutid}').button();
-  $('##{csv}').button();
-  $('##{select}').button();
-  $('##{from}').button();
-  $('##{to}').button();
-  $('##{logoutid}').removeClass('ui-corner-all');
-  $('##{csv}').removeClass('ui-corner-all');
-  $('##{select}').removeClass('ui-corner-all');
-  $('##{from}').removeClass('ui-corner-all');
-  $('##{to}').removeClass('ui-corner-all');
-
-  $('##{logoutid}').addClass('ui-red-button');
-
-// setting initial date on date selectors
-  setInitialDate();
-  
-
-
-
-  dtable = $('##{datatable}').dataTable({ 'bPaginate':false });
-  dtable.header = [];
-  
-  $('##{datatable}_info').css('position','absolute');
-  $('##{datatable}_info').css('top','0px');    
-//  new FixedHeader(dtable); //, { 'bottom':true });
-
-  dtable.$('tr').click( function () {
-    var data = dtable.fnGetData( this );
-    alert(data);
-  } );
-
-  function tableToCsv(){
-    var data = dtable.fnGetData();
-    var out = dtable.header.join(';') + '\n';
-    for(r in data){ out += data[r].join(';') + '\n'; }
-    return out;
-  };
-
-  $('##{csv}').click(function(){
-    window.URL = window.webkitURL || window.URL;
-
-    var a = document.createElement('a');
-    a.hidden = true;
-    a.download = 'table.csv';
-    a.href = window.URL.createObjectURL(new Blob([tableToCsv()], {type:MIME_TYPE}));
-    a.textContent = '';
-    a.dataset.downloadurl = [MIME_TYPE, a.download, a.href].join(':');
-    a.click();
-  });
-  
-  function setInitialDate(){
-    var date = new Date();
-    var dateString = date.getFullYear().toString() + '-' + (date.getMonth() + 1).toString() + '-' + date.getDate().toString();
-    document.getElementById('#{from}').value = dateString;
-    document.getElementById('#{to}').value = dateString;
-    $('##{from}').datepicker({ "changeMonth":true, "changeYear":true, "dateFormat":"yy-mm-dd" });
-    $('##{to}').datepicker({ "changeMonth":true, "changeYear":true, "dateFormat":"yy-mm-dd"  });
-    $('##{results}').text("Records from " + dateString + " to " + dateString);
-  }
-
-  document.getElementById('#{select}').onclick = function(){
-    $('##{select}').addClass('ui-black-button');
-
-    var xhr = new XMLHttpRequest();
-    xhr.multipart = true;
-    xhr.open("POST", "@{QueryR}", true);
-    xhr.setRequestHeader("Content-type","application/x-www-form-urlencoded");
-    var from = $('##{from}').val();
-    var to = $('##{to}').val();
-    xhr.send("from=" + from + "&to=" + to);
-    
-    xhr.onreadystatechange = function(){
-      if(xhr.readyState == 4){ // && xhr.status == 200){
-        var table_contents = JSON.parse(xhr.responseText);
-//        console.log(xhr.responseText);
-        dtable.fnClearTable();
-        dtable = $('##{datatable}').dataTable({
-          'bDeferRender': true,
-          'bPaginate':false,
-          'bDestroy': true,
-          'aaData':table_contents.body,
-          'aoColumns':table_contents.header.map(function(title){ return {"sTitle":title}; })
-        });
-        dtable.header = table_contents.header;
-        $('##{datatable}').css('width', '100%');
-        $('##{datatable}_info').css('position','absolute');
-        $('##{datatable}_info').css('top','0px');
-        $('##{results}').text("Records from " + from + " to " + to);
-      }
-      $('##{select}').removeClass('ui-black-button');
-    }
-  };
-});
-
-|]
-
+    [whamlet| ^{html} |]
 
 main :: IO ()
 main = do
@@ -423,17 +214,19 @@ main = do
     runSqlConn (runMigration migrateAll) conn    
 --    pconn <- P.connect "127.0.0.1 : 5432 " "radosys" user ""
     pconn <- P.connectPostgreSQL $ "hostaddr=127.0.0.1 port=5432 dbname=radosys user=" ++ user
-    statement <- P.prepare pconn $ 
-                 "SELECT " 
-                 ++ L.concat (L.intersperse "," field_names)  
-                 ++ " FROM radometer_results WHERE date_short >= ? and date_short <= ?"
+    stmt <- P.prepare pconn $ 
+            "SELECT array_to_json(array[" 
+            ++ L.concat (L.intersperse "," (map (\fn -> "cast(" ++ fn ++ " as text)") field_names))
+            ++ "]) FROM radometer_results WHERE date_short >= ? and date_short <= ?"
     
     static' <- static "static"
+    ioref <- newIORef M.empty
     warpDebug 12345 $ MyAuthSite { getAuthConn = conn 
                                  , getPConn = pconn
-                                 , getDateIntervalStatement = statement
+                                 , getDateIntervalStatement = stmt
                                  , getStatic = static'
-                                 , getFieldNames = field_names }
+                                 , getFieldNames = field_names
+                                 , getRestOfQuery = ioref }
     -- app <- toWaiApp $ MyAuthSite { getAuthConn = conn 
     --                              , getPConn = pconn
     --                              , getDateIntervalStatement = statement
