@@ -30,15 +30,18 @@ import Yesod.Auth.HashDB
 import Database.Persist.Sqlite
 import Data.Text (Text)
 import qualified Data.Text as T
--- import qualified Database.PostgreSQL.Simple as P
-import qualified Database.HSQL.PostgreSQL as P
-import qualified Database.HSQL as P
+
+import qualified Database.HDBC as P
+import qualified Database.HDBC.PostgreSQL as P
+
 import Control.Monad
 import Control.Monad.Trans (liftIO)
 import qualified Data.Map as M
-import qualified Data.ByteString.Char8 as B
+import qualified Data.ByteString.Lazy.Char8 as B
+import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as BL
 import qualified Text.JSON as J
+import qualified Data.Aeson as A
 import System.IO
 import System.Environment (getArgs)
 import qualified Data.List as L
@@ -62,6 +65,7 @@ Person
 
 data MyAuthSite = MyAuthSite { getAuthConn :: Connection
                              , getPConn :: P.Connection
+                             , getDateIntervalStatement :: P.Statement
                              , getStatic :: Static
                              , getFieldNames :: [String] }
 
@@ -155,10 +159,6 @@ body {
 
 |]
 
-
---     <form method=post action="http://localhost:3000/auth/page/hashdb/login">
-
-
 instance YesodAuth MyAuthSite where
     type AuthId MyAuthSite = PersonId
     loginDest _ = RootR
@@ -182,72 +182,34 @@ instance HashDBUser (PersonGeneric backend) where
 instance RenderMessage MyAuthSite FormMessage where
   renderMessage _ _ = defaultFormMessage
 
-  
---  select res_id, date_short from radometer_results where date_short > date '2012-05-01' and date_short < date '2012-05-08';
-
-selectByDateInterval :: [String] -> String -> String -> String
-selectByDateInterval fields from to =
-  L.concat $ 
-  ["SELECT "] 
-  ++ (L.intersperse "," fields) 
-  ++ [" FROM radometer_results WHERE date_short >= date '", from, "' and date_short <= date '", to, "';"]
-
-
-assembleQuery :: [String] -> String
-assembleQuery fields = 
-  L.concat $ 
-  ["SELECT "] 
-  ++ (L.intersperse "," fields) 
-  ++ [" FROM radometer_results WHERE res_id < 90;"]
-  
-assembleRows fields sment =
-  P.collectRows (\s -> mapM (P.getFieldValue s) fields) sment
+selectByDateInterval :: MyAuthSite -> String -> String -> Handler B.ByteString
+selectByDateInterval site from to = do
+  _ <- liftIO $ P.execute stmt [P.toSql from, P.toSql to]
+  results <- liftIO $ P.fetchAllRows stmt
+  return $ A.encode $ A.object 
+    [ "header" A..= getFieldNames site
+    , "body" A..= body (take 100 results) ]
+  where stmt = getDateIntervalStatement site
+        body :: [[P.SqlValue]] -> [[B.ByteString]]
+        body results = map (map P.fromSql) results
 
 postQueryR :: Handler RepJson
 postQueryR = do
   site <- getYesod
   from <- runInputPost $ ireq textField "from"
   to <- runInputPost $ ireq textField "to"
-  
-  sment <- liftIO $ P.query (getPConn site) (selectByDateInterval (getFieldNames site) (T.unpack from) (T.unpack to))
-  rows :: [[String]] <- liftIO (assembleRows (getFieldNames site) sment)
-  -- let header = [("Content-Type", "multipart/x-mixed-replace")] --,  ("Connection", "keep-alive")]  --("boundary", "12345"),
-  -- sendWaiResponse $ responseLBS status200 header "{\"header\":\"ans1\"}"
-  -- sendWaiResponse $ responseLBS status200 header "{\"header\":\"ans2\"}"
-  return $ RepJson $ toContent $ L.concat $ ["{\"header\":", show (getFieldNames site), ", \"body\":", show rows, "}"]
-                        
-  -- liftIO $ print "1st"
---  sendResponse $ RepJson $ toContent $ ("{\"header\" : \"other stuff\"}" :: String)
-  -- liftIO $ print "2nd"
-  -- sendResponse $ RepJson $ toContent $ L.concat $ ["{\"header\":", show (getFieldNames site), ", \"body\":", show rows, "}"]
-  -- liftIO $ print "3rd"
+  query <- selectByDateInterval site (T.unpack from) (T.unpack to)
+  return $ RepJson $ toContent $ query
 
---  return $ RepJson $ toContent $ ("{header : \"other stuff\"}" :: String)
-  
---  defaultLayout $ [whamlet| #{concatMap concat rows} |]
-  
---   app <- getYesod
---   liftIO $ do
---     putStrLn "Received POST, running: " -- ++ cmd app
--- --    system $ cmd app
---   defaultLayout $ [whamlet|ok|]
-  
---  bss <- liftIO consume
---  return $ RepJson $ toContent $ BL.fromChunks bss
-
-  -- body <- runInputGet $ ireq textField "message"
-  -- liftIO (print body)
-  
 getRootR :: Handler RepHtml
 getRootR = do
   site <- getYesod
   session <- getSession
   
-  let (id :: Int) = read $ B.unpack $ session M.! "_ID"
+  let (id :: Int) = read $ BS.unpack $ session M.! "_ID"
   Just person <- runDB $ get (Key (toPersistValue id) :: PersonId)
-                                                                                           
---  sment <- liftIO $ P.query (getPConn site) (assembleQuery (getFieldNames site))
-  let rows :: [[String]] = [] -- <- liftIO (assembleRows (getFieldNames site) sment)
+
+  let rows :: [[String]] = []
   
   [ header, logo, datatable, logoutid, content, csv, thead, select, from, to, datepicker, results ] <- replicateM 12 newIdent
   
@@ -430,12 +392,19 @@ main = do
         [u] -> u
   field_names <- getFieldNames "config.json"
   withSqliteConn "auth.db3" $ \conn -> do
-    runSqlConn (runMigration migrateAll) conn
-    pconn <- P.connect "127.0.0.1 : 5432 " "radosys" user ""
+    runSqlConn (runMigration migrateAll) conn    
+--    pconn <- P.connect "127.0.0.1 : 5432 " "radosys" user ""
+    pconn <- P.connectPostgreSQL $ "hostaddr=127.0.0.1 port=5432 dbname=radosys user=" ++ user
+    statement <- P.prepare pconn $ 
+                 "SELECT " 
+                 ++ L.concat (L.intersperse "," field_names)  
+                 ++ " FROM radometer_results WHERE date_short >= ? and date_short <= ?"
+    
     static' <- static "static"
     -- Yesod.Dispatch.toWaiApp
     warpDebug 12345 $ MyAuthSite { getAuthConn = conn 
-                                 , getPConn = pconn 
+                                 , getPConn = pconn
+                                 , getDateIntervalStatement = statement
                                  , getStatic = static'
                                  , getFieldNames = field_names }
     P.disconnect pconn
@@ -448,49 +417,3 @@ main = do
               case lookup "fields" (J.fromJSObject jobj) of
                 Just field_names -> return $ map T.unpack field_names
                 Nothing -> error "no attribute 'fields' in config.json"
-
-  -- <div ##{content}>
-  --   <button>A button element
-  --   <input type="submit" value="A submit button">
-  --   <a href="#">An anchor
-  --   <h1> Records:
-  --   <table ##{datatable}> 
-  --     <thead>
-  --       $forall header <- (getFieldNames site)
-  --         <th> #{header}
-  --     $forall row <- rows
-  --       <tr>
-  --         $forall col <- row
-  --           <td>
-  --             #{col}
-
-
-
--- <p>
---   ^{queryTables pconn}
-
--- <link rel=stylesheet href=@{Stylesheet}>
-
-
---     maid <- maybeAuthId
---     defaultLayout [whamlet|
--- <p>Your current auth ID: #{show maid}
--- $maybe _ <- maid
---     <p>
---         <a href=@{AuthR LogoutR}>Logout
--- $nothing
---     <p>
---         <a href=@{AuthR LoginR}>Go to the login page
--- |]
-
--- queryTables pconn = do
---   tnames <- liftIO (P.tables pconn)
---   [whamlet|
--- <h1> Table names: </h1>
---   <table>
---     $forall tname <- [1, 2, 3]
---       <tr> 
---         #{show tname}
--- |]
-
-
