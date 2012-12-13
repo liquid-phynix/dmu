@@ -194,13 +194,13 @@ getRootR = do
   defaultLayout $ do
     setTitle "DMU"
     toWidgetHead css
-    toWidgetHead js
     toWidgetHead [hamlet| <link rel=stylesheet href=@{StaticR css_jquery_ui_css}> |]
     toWidgetHead [hamlet| <link rel=stylesheet href=@{StaticR css_jquery_dataTables_css}> |]
     toWidgetHead [hamlet| <script src=@{StaticR js_jquery_1_6_4_min_js}> |]    
     toWidgetHead [hamlet| <script src=@{StaticR js_jquery_ui_1_9_2_custom_min_js}> |]
     toWidgetHead [hamlet| <script src=@{StaticR js_jquery_dataTables_min_js}> |]
     toWidgetHead [hamlet| <script src=@{StaticR js_FixedHeader_min_js}> |]
+    toWidgetHead js
     [whamlet| ^{html} |]
 
 main :: IO ()
