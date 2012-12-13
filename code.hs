@@ -21,6 +21,7 @@ TODO:
   - search bar for each column
   - better json
   - better postgresql
+  - table columns crop text
 -}
 
 import Yesod
@@ -50,6 +51,7 @@ import Data.Enumerator.List (consume)
 -- import Network.Wai.Middleware.Gzip (gzip, def)
 import Network.Wai -- (Response (ResponseSource))
 import Network.HTTP.Types (status200)
+import qualified Network.Wai.Handler.Warp as W
 
 
 staticFiles "static"
@@ -182,24 +184,50 @@ instance HashDBUser (PersonGeneric backend) where
 instance RenderMessage MyAuthSite FormMessage where
   renderMessage _ _ = defaultFormMessage
 
+-- select array_to_json(array[cast(res_id as text), cast(date_short as text)]) as result from radometer_results;
+
+-- turn query into json in sql
 selectByDateInterval :: MyAuthSite -> String -> String -> Handler B.ByteString
 selectByDateInterval site from to = do
-  _ <- liftIO $ P.execute stmt [P.toSql from, P.toSql to]
+  stmt <- liftIO $ P.prepare (getPConn site) $ 
+          "SELECT array_to_json(array[" 
+          ++ L.concat (L.intersperse "," (map (\fn -> "cast(" ++ fn ++ " as text)") (getFieldNames site)))
+          ++ "]) FROM radometer_results WHERE date_short >= ? and date_short <= ?"
+  liftIO $ P.execute stmt [P.toSql from, P.toSql to]
   results <- liftIO $ P.fetchAllRows stmt
-  return $ A.encode $ A.object 
-    [ "header" A..= getFieldNames site
-    , "body" A..= body (take 100 results) ]
-  where stmt = getDateIntervalStatement site
-        body :: [[P.SqlValue]] -> [[B.ByteString]]
-        body results = map (map P.fromSql) results
+  return $ B.concat
+    [ "{ \"header\" : " 
+    , B.pack $ show $ getFieldNames site
+    , ", \"body\" : " 
+    , "["
+    , B.intercalate "," $ map fs results 
+    , "] }" ]
+  where fs :: [P.SqlValue] -> B.ByteString
+        fs [s] = P.fromSql s
 
-postQueryR :: Handler RepJson
+
+-- H.prepare conn $ "SELECT array_to_json(array[" ++ LL.concat (LL.intersperse "," (map (\fn -> "cast(" ++ fn ++ " as text)") fields)) ++ "]) FROM radometer_results WHERE date_short >= ? and date_short <= ?"
+-- res <- H.execute stmt [H.toSql ("2012-05-01"::String), H.toSql ("2012-05-05" :: String)]
+
+-- turn query into json in haskell
+-- selectByDateInterval :: MyAuthSite -> String -> String -> Handler B.ByteString
+-- selectByDateInterval site from to = do
+--   liftIO $ P.execute stmt [P.toSql from, P.toSql to]
+--   results <- liftIO $ P.fetchAllRows stmt
+--   return $ A.encode $ A.object 
+--     [ "header" A..= getFieldNames site
+--     , "body" A..= body results ] --(take 100 results) ]
+--   where stmt = getDateIntervalStatement site
+--         body :: [[P.SqlValue]] -> [[B.ByteString]]
+--         body results = map (map P.fromSql) results
+
+postQueryR :: Handler RepPlain
 postQueryR = do
   site <- getYesod
   from <- runInputPost $ ireq textField "from"
   to <- runInputPost $ ireq textField "to"
   query <- selectByDateInterval site (T.unpack from) (T.unpack to)
-  return $ RepJson $ toContent $ query
+  return $ RepPlain $ toContent $ query
 
 getRootR :: Handler RepHtml
 getRootR = do
@@ -401,12 +429,18 @@ main = do
                  ++ " FROM radometer_results WHERE date_short >= ? and date_short <= ?"
     
     static' <- static "static"
-    -- Yesod.Dispatch.toWaiApp
     warpDebug 12345 $ MyAuthSite { getAuthConn = conn 
                                  , getPConn = pconn
                                  , getDateIntervalStatement = statement
                                  , getStatic = static'
                                  , getFieldNames = field_names }
+    -- app <- toWaiApp $ MyAuthSite { getAuthConn = conn 
+    --                              , getPConn = pconn
+    --                              , getDateIntervalStatement = statement
+    --                              , getStatic = static'
+    --                              , getFieldNames = field_names }
+    -- W.run 12345 app
+
     P.disconnect pconn
   where getFieldNames :: String -> IO [String]
         getFieldNames fn = do
