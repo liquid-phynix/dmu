@@ -43,27 +43,15 @@ $(document).ready(function (){
     };
 
     $('##{csv}').click(function(){
-        window.URL = window.webkitURL || window.URL;
-        var a = document.createElement('a');
-        a.hidden = true;
-        a.download = 'table.csv';
-        a.href = window.URL.createObjectURL(new Blob([tableToCsv()], {type:MIME_TYPE}));
-        a.textContent = '';
-        a.dataset.downloadurl = [MIME_TYPE, a.download, a.href].join(':');
-        a.click();
-
-
-        window.URL = window.webkitURL || window.URL;
-        var MIME_TYPE = 'plain/text';
-        var a = document.createElement('a');
-        a.hidden = true;
-        a.download = 'table.csv';
-        a.href = window.URL.createObjectURL(new Blob(["sadfsdhaiuf]sdguyfgyufguasdfsdf"], {type:MIME_TYPE}));
-        a.textContent = '';
-        a.dataset.downloadurl = [MIME_TYPE, a.download, a.href].join(':');
-        a.click();
-
-
+        showSave(tableToCsv(), 'table.csv', 'plain/text');
+        // window.URL = window.webkitURL || window.URL;
+        // var a = document.createElement('a');
+        // a.hidden = true;
+        // a.download = 'table.csv';
+        // a.href = window.URL.createObjectURL(new Blob([tableToCsv()], {type:MIME_TYPE}));
+        // a.textContent = '';
+        // a.dataset.downloadurl = [MIME_TYPE, a.download, a.href].join(':');
+        // a.click();
     });
     
     function setInitialDate(){

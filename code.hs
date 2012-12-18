@@ -193,7 +193,8 @@ getRootR = do
   [ header, logo, datatable, logoutid, content, csv, thead, select, from, to, datepicker, results ] <- replicateM 12 newIdent
   let css = $(luciusFileReload "main.css")
       html = $(hamletFile "main.hamlet")
-      js = $(TJ.juliusFileReload "main.js")
+      mainjs = $(TJ.juliusFileReload "main.js")
+      savejs = $(TJ.juliusFileReload "save.js")
   defaultLayout $ do
     setTitle "DMU"
     toWidgetHead css
@@ -204,7 +205,8 @@ getRootR = do
     toWidgetHead [hamlet| <script src=@{StaticR js_jquery_dataTables_min_js}> |]
     toWidgetHead [hamlet| <script src=@{StaticR js_FixedHeader_min_js}> |]
     toWidgetHead [hamlet| <script src=@{StaticR js_jquery_dataTables_columnFilter_js}> |]
-    toWidgetHead js
+    toWidgetHead savejs
+    toWidgetHead mainjs
     [whamlet| ^{html} |]
 
 instance TJ.ToJavascript T.Text where
@@ -226,6 +228,7 @@ main = do
     S.runSqlConn (S.runMigration migrateAll) conn    
 
     pconn <- P.connectPostgreSQL (printf "hostaddr=127.0.0.1 port=5432 dbname=radosys user=%s password=%s" (T.unpack user) (T.unpack password))
+    P.run pconn "DROP FUNCTION IF EXISTS a_to_j(text[]);" []
     P.run pconn array_to_json []
     
     stmt <- P.prepare pconn $ 
