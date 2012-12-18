@@ -1,11 +1,13 @@
 {
-    "fields" : [
+    "user" : "mcstar"
+    , "password" : ""
+    , "fields" : [
         "res_id"
         ,"date_short"
         ,"det_id"
         ,"slide_id"
-    ],
-    "nofields" : [
+    ]
+    , "nofields" : [
         "date"
         ,"comment"
         ,"inhom_ok"
