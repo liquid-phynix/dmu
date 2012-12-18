@@ -14,10 +14,14 @@
 <div style="display: table-row;">
   <div ##{content}>
     <h1 ##{results}>
-    <table ##{datatable}> 
+    <table ##{datatable}>
       <thead ##{thead}>
-        $forall header <- (getFieldNames site)
-          <th> #{header}
+        <tr>
+          $forall header <- (getFieldNames site)
+            <th> #{header}
+        <tr>
+          $forall header <- (getFieldNames site)
+            <th> #{header}
       $forall row <- rows
         <tr>
           $forall col <- row

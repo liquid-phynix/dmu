@@ -7,13 +7,15 @@
   J compression
   J datatables input as json
   J save header too, when csv export
-  - incremental table creation
+  J incremental table creation
   - fit content to window size
   J faster json generation
-  - search bar for each column
+  J search bar for each column
   J better json
   J better postgresql
   - table columns crop text
+  - fix search box width
+  - send default query automatically at start
 -}
 
 -- generic
@@ -29,7 +31,7 @@ import Yesod.Static
 import Yesod.Auth
 import Yesod.Auth.HashDB
 -- dbase
-import Database.Persist.Sqlite
+import qualified Database.Persist.Sqlite as S
 import qualified Database.HDBC as P
 import qualified Database.HDBC.PostgreSQL as P
 -- text
@@ -40,8 +42,8 @@ import qualified Data.Text as T
 import Data.Text (Text)
 import qualified Text.JSON as J
 import Text.Hamlet (hamletFile)
-import Text.Lucius (luciusFile)
-import Text.Julius (juliusFile)
+import Text.Lucius (luciusFileReload)
+import qualified Text.Julius as TJ
 --import qualified Data.Aeson as A
 -- system
 import System.IO
@@ -63,7 +65,7 @@ Person
 |]
 
 data MyAuthSite =
-  MyAuthSite { getAuthConn :: Connection
+  MyAuthSite { getAuthConn :: S.Connection
              , getPConn :: P.Connection
              , getDateIntervalStatement :: P.Statement
              , getStatic :: Static
@@ -81,7 +83,7 @@ mkYesod "MyAuthSite" [parseRoutes|
 instance Yesod MyAuthSite where
   approot = ApprootStatic "" --"http://localhost:3000"
   authRoute _ = Just (AuthR LoginR)
-  isAuthorized h _ | h == RootR || h == QueryR = do
+  isAuthorized h _ | h == RootR || h == QueryR || h == Query2R = do
     mauth <- maybeAuthId
     return $ case mauth of
       Nothing -> AuthenticationRequired
@@ -107,7 +109,7 @@ authPlugin =
       AuthPlugin apname apdispatch $ \input -> do
         [header, logo, title, login, logintable] <- lift $ replicateM 5 newIdent
         let html = $(hamletFile "login.hamlet")
-            css = $(luciusFile "login.css")
+            css = $(luciusFileReload "login.css")
         toWidget css
         [whamlet| ^{html} |]
 
@@ -120,10 +122,10 @@ instance YesodAuth MyAuthSite where
     authHttpManager = error "no need for http manager"
 
 instance YesodPersist MyAuthSite where
-    type YesodPersistBackend MyAuthSite = SqlPersist
+    type YesodPersistBackend MyAuthSite = S.SqlPersist
     runDB f = do
       site <- getYesod
-      runSqlConn f (getAuthConn site)
+      S.runSqlConn f (getAuthConn site)
 
 instance HashDBUser (PersonGeneric backend) where
   userPasswordHash = Just . personPassword
@@ -177,7 +179,7 @@ postQuery2R = do
 getUsername = do
   session <- getSession
   let (id :: Int) = read $ BS.unpack $ session M.! "_ID"
-  Just person <- runDB $ get (Key (toPersistValue id) :: PersonId)
+  Just person <- runDB $ S.get (S.Key (S.toPersistValue id) :: PersonId)
   return $ personUsername person
 
 getRootR :: Handler RepHtml
@@ -188,9 +190,9 @@ getRootR = do
   let rows :: [[String]] = []
   
   [ header, logo, datatable, logoutid, content, csv, thead, select, from, to, datepicker, results ] <- replicateM 12 newIdent
-  let css = $(luciusFile "main.css")
+  let css = $(luciusFileReload "main.css")
       html = $(hamletFile "main.hamlet")
-      js = $(juliusFile "main.js")
+      js = $(TJ.juliusFileReload "main.js")
   defaultLayout $ do
     setTitle "DMU"
     toWidgetHead css
@@ -200,8 +202,12 @@ getRootR = do
     toWidgetHead [hamlet| <script src=@{StaticR js_jquery_ui_1_9_2_custom_min_js}> |]
     toWidgetHead [hamlet| <script src=@{StaticR js_jquery_dataTables_min_js}> |]
     toWidgetHead [hamlet| <script src=@{StaticR js_FixedHeader_min_js}> |]
+    toWidgetHead [hamlet| <script src=@{StaticR js_jquery_dataTables_columnFilter_js}> |]
     toWidgetHead js
     [whamlet| ^{html} |]
+
+instance TJ.ToJavascript T.Text where
+  toJavascript = TJ.toJavascript . TJ.rawJS
 
 main :: IO ()
 main = do
@@ -210,12 +216,14 @@ main = do
         [] -> "mcstar"
         [u] -> u
   field_names <- getFieldNames "config.json"
-  withSqliteConn "auth.db3" $ \conn -> do
-    runSqlConn (runMigration migrateAll) conn    
---    pconn <- P.connect "127.0.0.1 : 5432 " "radosys" user ""
+  S.withSqliteConn "auth.db3" $ \conn -> do
+    S.runSqlConn (S.runMigration migrateAll) conn    
+
     pconn <- P.connectPostgreSQL $ "hostaddr=127.0.0.1 port=5432 dbname=radosys user=" ++ user
+    P.run pconn array_to_json []
+    
     stmt <- P.prepare pconn $ 
-            "SELECT array_to_json(array[" 
+            "SELECT a_to_j(array[" 
             ++ L.concat (L.intersperse "," (map (\fn -> "cast(" ++ fn ++ " as text)") field_names))
             ++ "]) FROM radometer_results WHERE date_short >= ? and date_short <= ?"
     
@@ -244,3 +252,5 @@ main = do
               case lookup "fields" (J.fromJSObject jobj) of
                 Just field_names -> return $ map T.unpack field_names
                 Nothing -> error "no attribute 'fields' in config.json"
+                
+        array_to_json = "CREATE OR REPLACE FUNCTION a_to_j(ar text[]) RETURNS text AS $$ BEGIN RETURN '[\"' || array_to_string(ar,'\",\"') || '\"]'; END; $$ LANGUAGE plpgsql;"

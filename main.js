@@ -21,6 +21,10 @@ $(document).ready(function (){
 
     dtable = $('##{datatable}').dataTable({ 'bPaginate':false });
     dtable.header = [];
+    dtable.columnFilter({
+        'sPlaceHolder' : 'head:after'
+//        , 'aoColumns' : dtable.header.map(function(head){ return {'type' : 'text' }; })
+    });
     
     $('##{datatable}_info').css('position','absolute');
     $('##{datatable}_info').css('top','0px');    
@@ -40,7 +44,6 @@ $(document).ready(function (){
 
     $('##{csv}').click(function(){
         window.URL = window.webkitURL || window.URL;
-
         var a = document.createElement('a');
         a.hidden = true;
         a.download = 'table.csv';
@@ -48,6 +51,19 @@ $(document).ready(function (){
         a.textContent = '';
         a.dataset.downloadurl = [MIME_TYPE, a.download, a.href].join(':');
         a.click();
+
+
+        window.URL = window.webkitURL || window.URL;
+        var MIME_TYPE = 'plain/text';
+        var a = document.createElement('a');
+        a.hidden = true;
+        a.download = 'table.csv';
+        a.href = window.URL.createObjectURL(new Blob(["sadfsdhaiuf]sdguyfgyufguasdfsdf"], {type:MIME_TYPE}));
+        a.textContent = '';
+        a.dataset.downloadurl = [MIME_TYPE, a.download, a.href].join(':');
+        a.click();
+
+
     });
     
     function setInitialDate(){
@@ -84,9 +100,14 @@ $(document).ready(function (){
                     'bPaginate':false,
                     'bDestroy': true,
                     'aaData':table_contents.body,
-                    'aoColumns':table_contents.header.map(function(title){ return {"sTitle":title}; })
+                    'aoColumns':table_contents.header.map(function(title){ return { "sTitle":title }; })
+//                    'sScrollY': "10em"
                 });
                 dtable.header = table_contents.header;
+                dtable.columnFilter({ 
+                    'sPlaceHolder' : 'head:after',
+                    'aoColumns' : dtable.header.map(function(head){ return {'type' : 'text' }; })
+                });
                 $('##{datatable}').css('width', '100%');
                 $('##{datatable}_info').css('position','absolute');
                 $('##{datatable}_info').css('top','0px');
