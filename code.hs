@@ -259,4 +259,5 @@ main = do
             Just res -> case A.fromJSON res of
               A.Error s -> error s
               A.Success a -> a
-        array_to_json = "CREATE OR REPLACE FUNCTION a_to_j(ar text[]) RETURNS text AS $$ BEGIN RETURN '[\"' || array_to_string(ar,'\",\"') || '\"]'; END; $$ LANGUAGE plpgsql;"
+        array_to_json = "CREATE OR REPLACE FUNCTION a_to_j(in text[], out text) AS $$ SELECT E'[\"' || array_to_string($1,E'\",\"') || E'\"]' $$ LANGUAGE SQL;"
+--          "CREATE OR REPLACE FUNCTION a_to_j(ar text[]) RETURNS text AS $$ BEGIN RETURN '[\"' || array_to_string(ar,'\",\"') || '\"]'; END; $$ LANGUAGE plpgsql;"
