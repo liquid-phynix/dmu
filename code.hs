@@ -23,6 +23,7 @@ import Control.Monad
 import Control.Monad.Trans (liftIO)
 import qualified Data.Map as M
 import qualified Data.List as L
+import qualified Data.HashMap.Strict as HM
 import Data.IORef
 -- yesod
 import Yesod
@@ -38,15 +39,16 @@ import qualified Data.ByteString.Lazy.Char8 as B
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text as T
-import Data.Text (Text)
-import qualified Text.JSON as J
+-- import Data.Text (Text)
+--import qualified Text.JSON as J
 import Text.Hamlet (hamletFile)
 import Text.Lucius (luciusFileReload)
 import qualified Text.Julius as TJ
---import qualified Data.Aeson as A
+import qualified Data.Aeson as A
 -- system
 import System.IO
-import System.Environment (getArgs)
+import Text.Printf (printf)
+--import System.Environment (getArgs)
 -- wai
 import Network.Wai
 import Network.HTTP.Types (status200)
@@ -56,9 +58,9 @@ staticFiles "static"
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistUpperCase|
 Person
-  username Text
-  password Text
-  salt Text
+  username T.Text
+  password T.Text
+  salt T.Text
   UniquePerson username
   deriving Show
 |]
@@ -69,7 +71,7 @@ data MyAuthSite =
              , getDateIntervalStatement :: P.Statement
              , getStatic :: Static
              , getFieldNames :: [String]
-             , getRestOfQuery :: IORef (M.Map Text [P.SqlValue]) }
+             , getRestOfQuery :: IORef (M.Map T.Text [P.SqlValue]) }
 
 mkYesod "MyAuthSite" [parseRoutes|
 / RootR GET
@@ -210,15 +212,20 @@ instance TJ.ToJavascript T.Text where
 
 main :: IO ()
 main = do
-  args <- getArgs
-  let user = case args of
-        [] -> "mcstar"
-        [u] -> u
-  field_names <- getFieldNames "config.json"
+  config <- do
+    contents <- BL.readFile "config.json"
+    case A.decode contents of 
+      Nothing -> error "json decode failed on config.json"
+      Just (A.Object hm) -> return hm
+
+  let field_names = getFromConfig config "fields"
+      user = getFromConfig config "user"
+      password = getFromConfig config "password"
+  
   S.withSqliteConn "auth.db3" $ \conn -> do
     S.runSqlConn (S.runMigration migrateAll) conn    
 
-    pconn <- P.connectPostgreSQL $ "hostaddr=127.0.0.1 port=5432 dbname=radosys user=" ++ user
+    pconn <- P.connectPostgreSQL (printf "hostaddr=127.0.0.1 port=5432 dbname=radosys user=%s password=%s" (T.unpack user) (T.unpack password))
     P.run pconn array_to_json []
     
     stmt <- P.prepare pconn $ 
@@ -228,28 +235,28 @@ main = do
     
     static' <- static "static"
     ioref <- newIORef M.empty
-    warpDebug 12345 $ MyAuthSite { getAuthConn = conn 
+    -- warpDebug 12345 $ MyAuthSite { getAuthConn = conn 
+    --                              , getPConn = pconn
+    --                              , getDateIntervalStatement = stmt
+    --                              , getStatic = static'
+    --                              , getFieldNames = field_names
+    --                              , getRestOfQuery = ioref }
+    
+    app <- toWaiApp $ MyAuthSite { getAuthConn = conn 
                                  , getPConn = pconn
                                  , getDateIntervalStatement = stmt
                                  , getStatic = static'
                                  , getFieldNames = field_names
                                  , getRestOfQuery = ioref }
-    -- app <- toWaiApp $ MyAuthSite { getAuthConn = conn 
-    --                              , getPConn = pconn
-    --                              , getDateIntervalStatement = statement
-    --                              , getStatic = static'
-    --                              , getFieldNames = field_names }
-    -- W.run 12345 app
+    W.run 12345 app
+    
 
     P.disconnect pconn
-  where getFieldNames :: String -> IO [String]
-        getFieldNames fn = do
-          contents <- readFile fn
-          case J.decode contents of 
-            J.Error s -> error "json decode failed on config.json" 
-            J.Ok jobj -> 
-              case lookup "fields" (J.fromJSObject jobj) of
-                Just field_names -> return $ map T.unpack field_names
-                Nothing -> error "no attribute 'fields' in config.json"
-                
+  where -- getFromConfig :: A.Object -> Text -> a
+        getFromConfig obj asc =
+          case  HM.lookup asc obj of 
+            Nothing -> error (printf "no attribute %s in config.json" (T.unpack asc))
+            Just res -> case A.fromJSON res of
+              A.Error s -> error s
+              A.Success a -> a
         array_to_json = "CREATE OR REPLACE FUNCTION a_to_j(ar text[]) RETURNS text AS $$ BEGIN RETURN '[\"' || array_to_string(ar,'\",\"') || '\"]'; END; $$ LANGUAGE plpgsql;"
