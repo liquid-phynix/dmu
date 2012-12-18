@@ -23,7 +23,6 @@ import Control.Monad
 import Control.Monad.Trans (liftIO)
 import qualified Data.Map as M
 import qualified Data.List as L
-import Data.Enumerator.List (consume)
 import Data.IORef
 -- yesod
 import Yesod
