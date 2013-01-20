@@ -19,9 +19,9 @@
         <tr>
           $forall header <- (getFieldNames site)
             <th> #{header}
-        # <tr>
-        #   $forall header <- (getFieldNames site)
-        #     <th> #{header}
+$#        <tr>
+$#          $forall header <- (getFieldNames site)
+$#            <th> #{header}
       $forall row <- rows
         <tr>
           $forall col <- row
