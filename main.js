@@ -21,22 +21,23 @@ $(document).ready(function (){
 
     dtable = $('##{datatable}').dataTable({ 'bPaginate':false });
     dtable.header = [];
-    dtable.columnFilter({
-        'sPlaceHolder' : 'head:after'
-//        , 'aoColumns' : dtable.header.map(function(head){ return {'type' : 'text' }; })
-    });
+//     dtable.columnFilter({
+//         'sPlaceHolder' : 'head:after'
+// //        , 'aoColumns' : dtable.header.map(function(head){ return {'type' : 'text' }; })
+//     });
     
     $('##{datatable}_info').css('position','absolute');
     $('##{datatable}_info').css('top','0px');    
     //  new FixedHeader(dtable); //, { 'bottom':true });
 
-    dtable.$('tr').click( function () {
-        var data = dtable.fnGetData( this );
-        alert(data);
-    } );
+    // dtable.$('tr').click( function () {
+    //     var data = dtable.fnGetData( this );
+    //     alert(data);
+    // } );
 
     function tableToCsv(){
-        var data = dtable.fnGetData();
+//        var data = dtable.fnGetData();
+        var data = dtable._('tr', {'filter' : 'applied'});
         var out = dtable.header.join(';') + '\n';
         for(var r in data){ out += data[r].join(';') + '\n'; }
         return out;
@@ -92,10 +93,10 @@ $(document).ready(function (){
 //                    'sScrollY': "10em"
                 });
                 dtable.header = table_contents.header;
-                dtable.columnFilter({ 
-                    'sPlaceHolder' : 'head:after',
-                    'aoColumns' : dtable.header.map(function(head){ return {'type' : 'text' }; })
-                });
+                // dtable.columnFilter({ 
+                //     'sPlaceHolder' : 'head:after',
+                //     'aoColumns' : dtable.header.map(function(head){ return {'type' : 'text' }; })
+                // });
                 $('##{datatable}').css('width', '100%');
                 $('##{datatable}_info').css('position','absolute');
                 $('##{datatable}_info').css('top','0px');

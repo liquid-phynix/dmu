@@ -16,6 +16,7 @@
   - table columns crop text
   - fix search box width
   - send default query automatically at start
+  - save only visible part of table
 -}
 
 -- generic
