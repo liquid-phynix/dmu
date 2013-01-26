@@ -48,8 +48,9 @@ import qualified Text.Julius as TJ
 import qualified Data.Aeson as A
 -- system
 import System.IO
+import System.Directory
 import Text.Printf (printf)
---import System.Environment (getArgs)
+import System.Environment (getArgs)
 -- wai
 import Network.Wai
 import Network.HTTP.Types (status200)
@@ -215,6 +216,12 @@ instance TJ.ToJavascript T.Text where
 
 main :: IO ()
 main = do
+  args <- getArgs
+  case args of
+    ["-d", path] | not (null path) -> do
+      setCurrentDirectory path
+      putStrLn $ "base dir set to " ++ path
+    _ -> return ()
   config <- do
     contents <- BL.readFile "config.json"
     case A.decode contents of 
