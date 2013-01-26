@@ -224,6 +224,7 @@ main = do
   let field_names = getFromConfig config "fields"
       user = getFromConfig config "user"
       password = getFromConfig config "password"
+      table = getFromConfig config "datatable"
   
   S.withSqliteConn "auth.db3" $ \conn -> do
     S.runSqlConn (S.runMigration migrateAll) conn    
@@ -235,7 +236,7 @@ main = do
     stmt <- P.prepare pconn $ 
             "SELECT a_to_j(array[" 
             ++ L.concat (L.intersperse "," (map (\fn -> "cast(" ++ fn ++ " as text)") field_names))
-            ++ "]) FROM radometer_results WHERE date_short >= ? and date_short <= ?"
+            ++ "]) FROM " ++ T.unpack table ++ " WHERE date_short >= ? and date_short <= ?"
     
     static' <- static "static"
     ioref <- newIORef M.empty
